@@ -1,0 +1,498 @@
+## Create tables and read in data
+## Make sure data matches the below tables
+## Add PK if necessary in csv file
+
+CREATE TABLE project (
+	pk int NOT NULL auto_increment
+    ,ProjID int default null
+    ,ProjName varchar(255) default null
+    ,TLINE_NAME varchar(255) default null
+    ,KV varchar(255) default null
+    ,LINE_ID int default null
+    ,FROM_S varchar(255) default null
+    ,TO_S varchar(255) default null
+    ,PRIMARY KEY (pk)
+    );
+    
+CREATE TABLE spans (
+	pk int not null auto_increment
+    ,TLINE_NAME varchar(50)
+    ,KV varchar(10)
+    ,ROUTE_ID varchar(50)
+    ,SPAN_ID varchar(50)
+    ,FROM_TO varchar(50)
+    ,primary key (pk)
+    );
+    
+LOAD DATA INFILE 'file_name_1.csv'
+INTO TABLE project
+COLUMNS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+ESCAPED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 0 LINES;
+
+LOAD DATA INFILE 'file_name_2.csv'
+INTO TABLE spans
+COLUMNS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+ESCAPED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 0 LINES;
+
+###############################
+#### Clean string data ########
+## Data has extra characters ##
+###############################
+
+UPDATE project 
+SET 
+	TO_S = TRIM(REPLACE(REPLACE(TO_S, '\r', ''), '\n', ''))
+    ,FROM_S = TRIM(REPLACE(REPLACE(FROM_S,'\r', ''), '\n', ''))
+    ,TLINE_NAME = TRIM(REPLACE(REPLACE(TLINE_NAME,'\r', ''), '\n', ''))
+WHERE pk>=0;
+
+UPDATE spans 
+SET 
+	FROM_TO = TRIM(REPLACE(REPLACE(FROM_TO, '\r', ''), '\n', ''))
+    ,TLINE_NAME = TRIM(REPLACE(REPLACE(TLINE_NAME,'\r', ''), '\n', ''))
+WHERE pk>=0;
+
+############################
+## Reformat Projects data ##
+############################
+
+# Pr = prefix, Mi = mile, Po = Pole, Le = Letter || S = Start, E = End
+alter table project
+	add column PrS varchar(50) default null
+    ,add column MiS varchar(50) default null
+    ,add column PoS varchar(50) default null
+    ,add column LeS varchar(50) default null
+    ,add column PrE varchar(50) default null
+    ,add column MiE varchar(50) default null
+    ,add column PoE varchar(50) default null
+    ,add column LeE varchar(50) default null;
+
+################################################
+## Pull out values from beginning span string ##
+################################################
+
+# Pulls out any prefixes for the starting span, corrects for substations
+UPDATE project 
+SET 
+    PrS = IF(LEFT(FROM_S, 1) NOT REGEXP '[0-9]',
+        LEFT(FROM_S, 1),
+        ''),
+    PrS = IF(FROM_S REGEXP 'SUB|TERM|PHS|000/000', '', Prs)
+WHERE
+    PK >= 0;
+    
+# Pulls out the mile number for the starting span, corrects for substations
+UPDATE project 
+SET 
+    MiS = IF(LEFT(FROM_S, 1) NOT REGEXP '[0-9]',
+        SUBSTRING(FROM_S,
+            2,
+            INSTR(FROM_S, '/') - 2),
+        LEFT(FROM_S, INSTR(FROM_S, '/') - 1)),
+    MiS = IF(Mis NOT REGEXP '[1-9]',
+        0,
+        TRIM(LEADING '0' FROM MiS)),
+	MiS = if(right(MiS,1) NOT REGEXP '[0-9]', left(MiS, length(MiS)-1),Mis),
+    MiS = IF(FROM_S REGEXP 'SUB|TERM|PHS|000/000', 0, MiS)
+WHERE
+    PK >= 0;
+
+# Pulls out any trailing letters from starting span
+# Convert any letters to numbers based on position
+# in the alphabet
+UPDATE project
+SET
+	LeS = null
+    ,LeS = if(right(FROM_S,1) regexp '[A-Z]', right(FROM_S,1),'')
+    ,Les = if(FROM_S REGEXP 'SUB|TERM|PHS|000/000','',LeS)
+    ,LeS = position(LeS IN '#ABCDEFGHIJKLMNOPQRSTUVQXYZ')-1
+WHERE
+	PK >= 0;
+    
+# Pulls out the pole number for the starting span
+UPDATE project
+SET
+	PoS = NULL
+	,PoS = RIGHT(FROM_S,LENGTH(FROM_S)-instr(FROM_S,'/'))
+    ,PoS = TRIM(LEADING '/' FROM PoS)
+    ,PoS = TRIM(LEADING '0' FROM PoS)
+    ,PoS = if((length(Pos) = 1) AND (PoS NOT REGEXP '[0-9]'),0,PoS)
+    ,PoS = if(FROM_S REGEXP 'SUB|TERM|PHS|000/000',0,Pos)
+    ,PoS = if(RIGHT(PoS,1) regexp '[A-Z]', LEFT(PoS, length(Pos)-1),Pos)
+WHERE
+	PK >= 0;
+
+# Set all non correct format values to 555
+UPDATE project
+SET
+	PrS = if(FROM_S not like '%/%',5555,PrS),
+    MiS = if(FROM_S not like '%/%',5555,MiS),
+    PoS = if(FROM_S not like '%/%',5555,PoS),
+    LeS = if(FROM_S not like '%/%',5555,LeS)
+WHERE
+	PK >= 0;
+    
+#############################################
+## Pull out values from ending span string ##
+#############################################
+    
+# Pulls out any prefixes for the ending span, corrects for substations
+UPDATE project 
+SET 
+    PrE = IF(LEFT(TO_S, 1) NOT REGEXP '[0-9]',
+        LEFT(TO_S, 1),
+        ''),
+    PrE = IF(TO_S REGEXP 'SUB|TERM|PHS|000/000', '', PrE)
+WHERE
+    PK >= 0;
+    
+# Pulls out the mile number for the ending span, corrects for substations
+UPDATE project 
+SET 
+    MiE = IF(LEFT(TO_S, 1) NOT REGEXP '[0-9]',
+        SUBSTRING(TO_S, 2, INSTR(TO_S, '/') - 2),
+        LEFT(TO_S, INSTR(TO_S, '/') - 1)),
+    MiE = IF(MiE NOT REGEXP '[1-9]',
+        0,
+        TRIM(LEADING '0' FROM MiE)),
+	MiE = if(right(MiE,1) NOT REGEXP '[0-9]', left(MiE, length(MiS)-1),MiE),
+    MiE = IF(TO_S REGEXP 'SUB|TERM|PHS|000/000', 9999, MiE)
+WHERE
+    PK >= 0;
+    
+# Pulls out any trailing letters from ending span
+# Convert any letters to numbers based on position
+# in the alphabet
+UPDATE project
+SET
+	LeE = null
+    ,LeE = if(right(TO_S,1) regexp '[A-Z]', right(TO_S,1),'')
+    ,LeE = if(TO_S REGEXP 'SUB|TERM|PHS|000/000','',LeE)
+    ,LeE = position(LeE IN ' ABCDEFGHIJKLMNOPQRSTUVQXYZ')-1
+WHERE
+	PK >= 0;
+    
+# Pulls out the pole number for the ending span
+UPDATE project
+SET
+	PoE = NULL
+	,PoE = RIGHT(TO_S,length(TO_S)-instr(TO_S,'/'))
+    ,PoE = TRIM(LEADING '/' FROM PoE)
+    ,PoE = TRIM(LEADING '0' FROM PoE)
+    ,PoE = if((length(PoE) = 1) AND (PoE NOT REGEXP '[0-9]'),0,PoE)
+    ,PoE = if(TO_S REGEXP 'SUB|TERM|PHS|000/000',9999,PoE)
+    ,PoE = if(RIGHT(PoE,1) regexp '[A-Z]', LEFT(PoE, length(PoE)-1),PoE)
+WHERE
+	PK >= 0;
+
+# Set all incorrect format values to 555
+UPDATE project
+SET
+	PrE = if(TO_S not like '%/%',5555,PrE),
+    MiE = if(TO_S not like '%/%',5555,MiE),
+    PoE = if(TO_S not like '%/%',5555,PoE),
+    LeE = if(TO_S not like '%/%',5555,LeE)
+WHERE
+	PK >= 0;
+        
+################################################################################
+## Use Mile, Pole, Letters to calculate relative position throughout the line ##
+###### Pole numbers restart each mile, assummes letters go in alpha order ######
+
+# Add two new columns for calculated values
+alter table project
+	add column work_start float default null
+    ,add column work_end float default null;
+    
+# Calculate starting position
+# Dividing sub values allows for sequential ordering
+# for when values re-start each mile or when there are sub-spans
+UPDATE project
+SET
+	work_start = MiS + (PoS/10000) + (LeS/1000000)
+    ,work_end =MiE + (PoE/10000) + (LeE/1000000)
+WHERE
+	PK >=0;
+    
+##########################################################
+## Modify spans string data to compare to project spans ##
+##########################################################
+
+# Pr = prefix, Mi = mile, Po = Pole, Le = Letter || S = Start, E = End
+alter table spans
+	add column FROM_S varchar(50) default null
+    ,add column To_S varchar(50) default null
+	,add column PrS varchar(50) default null
+    ,add column MiS varchar(50) default null
+    ,add column PoS varchar(50) default null
+    ,add column LeS varchar(50) default null
+    ,add column PrE varchar(50) default null
+    ,add column MiE varchar(50) default null
+    ,add column PoE varchar(50) default null
+    ,add column LeE varchar(50) default null;
+
+UPDATE spans
+SET
+	FROM_S = left(FROM_TO, instr(FROM_TO,'-')-1),
+    TO_S = right(FROM_TO, length(FROM_TO)-instr(FROM_TO,'-'))
+WHERE
+	PK>=0;
+    
+
+################################################
+## Pull out values from beginning span string ##
+################################################
+
+# Pulls out any prefixes for the starting span, corrects for substations
+UPDATE spans 
+SET 
+    PrS = IF(LEFT(FROM_S, 1) NOT REGEXP '[0-9]',
+        LEFT(FROM_S, 1),
+        ''),
+    Prs = IF(LEFT(FROM_S, 2) NOT REGEXP '[0-9]|/',
+        LEFT(FROM_S, 2),
+        PrS),
+    PrS = IF(RIGHT(FROM_S, 1) NOT REGEXP '[0-9]|[A-Z]',
+        RIGHT(FROM_S, 1),
+        Prs),
+    PrS = IF(FROM_S REGEXP 'SUB|TERM|PHS',
+        '',
+        Prs)
+WHERE
+    PK >= 0;
+    
+
+# Pulls out the mile number for the starting span, corrects for substations
+UPDATE spans 
+SET 
+    MiS = IF(LEFT(FROM_S, 1) NOT REGEXP '[0-9]',
+        SUBSTRING(FROM_S,
+            length(PrS)+1,
+            INSTR(FROM_S, '/') - 2),
+        LEFT(FROM_S, INSTR(FROM_S, '/') - 1)),
+    MiS = IF(Mis NOT REGEXP '[1-9]',
+        0,
+        TRIM(LEADING '0' FROM MiS)),
+	MiS = if(right(MiS,1) NOT REGEXP '[0-9]', left(MiS, length(MiS)-1),Mis),
+    MiS = IF(FROM_S REGEXP 'SUB|TERM|PHS', 0, MiS)
+WHERE
+    PK >= 0;
+    
+# Pulls out any trailing letters from starting span
+# Convert any letters to numbers based on position
+# in the alphabet
+UPDATE spans
+SET
+	LeS = null
+    ,LeS = if(right(FROM_S,1) regexp '[A-Z]', right(FROM_S,1),'')
+    ,Les = if(FROM_S REGEXP 'SUB|TERM|PHS','',LeS)
+    ,LeS = position(LeS IN '#ABCDEFGHIJKLMNOPQRSTUVQXYZ')-1
+WHERE
+	PK >= 0;
+    
+# SPANS
+# Pulls out the pole number for the starting span
+UPDATE spans
+SET
+	PoS = NULL
+	,PoS = RIGHT(FROM_S,LENGTH(FROM_S)-instr(FROM_S,'/'))
+    ,PoS = TRIM(LEADING '/' FROM PoS)
+    ,PoS = TRIM(LEADING '0' FROM PoS)
+    ,PoS = if((length(Pos) = 1) AND (PoS NOT REGEXP '[0-9]'),0,PoS)
+    ,PoS = if(FROM_S REGEXP 'SUB|TERM|PHS',0,Pos)
+    ,PoS = if(RIGHT(PoS,1) not regexp '[A-Z]|[0-9]', LEFT(PoS, length(PoS)-1),PoS)
+    ,PoS = if(RIGHT(PoS,1) not regexp '[A-Z]|[0-9]', LEFT(PoS, length(PoS)-1),PoS)
+    ,PoS = if(RIGHT(PoS,1) regexp '[A-Z]', LEFT(PoS, length(Pos)-1),Pos)
+    ,PoS = if(RIGHT(PoS,1) regexp '[A-Z]', LEFT(PoS, length(Pos)-1),Pos)
+    ,PoS = if(RIGHT(PoS,1) regexp '[A-Z]', LEFT(PoS, length(Pos)-1),Pos)
+WHERE
+	PK >= 0;
+    
+############################################
+## SPANS: Pull out values for end of span ##
+############################################
+
+# SPANS
+# Pulls out any prefixes for the starting span, corrects for substations
+UPDATE spans 
+SET 
+    PrE = IF(LEFT(TO_S, 1) NOT REGEXP '[0-9]',
+        LEFT(TO_S, 1),
+        ''),
+    PrE = IF(LEFT(TO_S, 2) NOT REGEXP '[0-9]|/',
+        LEFT(TO_S, 2),
+        PrE),
+    PrE = IF(RIGHT(TO_S, 1) NOT REGEXP '[0-9]|[A-Z]',
+        RIGHT(TO_S, 1),
+        PrE),
+    PrE = IF(TO_S REGEXP 'SUB|TERM|PHS',
+        '',
+        PrE)
+WHERE
+    PK >= 0;
+    
+# SPANS START MILE
+# Pulls out the mile number for the starting span, corrects for substations
+UPDATE spans 
+SET 
+    MiE = IF(LEFT(TO_S, 1) NOT REGEXP '[0-9]',
+        SUBSTRING(TO_S,
+            length(PrE)+1,
+            INSTR(TO_S, '/') - 2),
+        LEFT(TO_S, INSTR(TO_S, '/') - 1)),
+    MiE = IF(MiE NOT REGEXP '[1-9]',
+        0,
+        TRIM(LEADING '0' FROM MiE)),
+	MiE = if(right(MiE,1) NOT REGEXP '[0-9]', left(MiE, length(MiE)-1),MiE),
+    MiE = IF(TO_S REGEXP 'SUB|TERM|PHS', 0, MiE)
+WHERE
+    PK >= 0;
+
+# SPANS
+# Pulls out any trailing letters from starting span
+# Convert any letters to numbers based on position
+# in the alphabet
+UPDATE spans
+SET
+	LeE = null
+    ,LeE = if(right(TO_S,1) regexp '[A-Z]', right(TO_S,1),'')
+    ,LeE = if(TO_S REGEXP 'SUB|TERM|PHS','',LeE)
+    ,LeE = position(LeE IN '#ABCDEFGHIJKLMNOPQRSTUVQXYZ')-1
+WHERE
+	PK >= 0;
+
+# Pulls out the pole number for the starting span
+# Pulls out the pole number for the ending span
+UPDATE spans
+SET
+	PoE = NULL
+	,PoE = RIGHT(TO_S,length(TO_S)-instr(TO_S,'/'))
+    ,PoE = TRIM(LEADING '/' FROM PoE)
+    ,PoE = TRIM(LEADING '0' FROM PoE)
+    ,PoE = if((length(PoE) = 1) AND (PoE NOT REGEXP '[0-9]'),0,PoE)
+    ,PoE = if(TO_S REGEXP 'SUB|TERM|PHS',9999,PoE)
+    ,PoE = if(RIGHT(PoE,1) not regexp '[A-Z]|[0-9]', LEFT(PoE, length(PoE)-1),PoE)
+    ,PoE = if(RIGHT(PoE,1) not regexp '[A-Z]|[0-9]', LEFT(PoE, length(PoE)-1),PoE)
+    ,PoE = if(RIGHT(PoE,1) regexp '[A-Z]', LEFT(PoE, length(PoE)-1),PoE)
+    ,PoE = if(RIGHT(PoE,1) regexp '[A-Z]', LEFT(PoE, length(PoE)-1),PoE)
+    ,PoE = if(RIGHT(PoE,1) regexp '[A-Z]', LEFT(PoE, length(PoE)-1),PoE)
+WHERE
+	PK >= 0;
+    
+UPDATE spans
+SET
+	PrE = if(TO_S not like '%/%',5555,PrE),
+    MiE = if(TO_S not like '%/%',5555,MiE),
+    PoE = if(TO_S not like '%/%',5555,PoE),
+    LeE = if(TO_S not like '%/%',5555,LeE)
+WHERE
+	PK >= 0;
+    
+## Create relative position for each pole based on mile, span, letter ##
+ALTER TABLE spans
+	add column start_pole float default null
+    ,add column end_pole float default null;
+    
+# Calculate starting position
+UPDATE spans
+SET
+	start_pole = MiS + (PoS/10000) + (LeS/1000000)
+    ,end_pole = MiE + (PoE/10000) + (LeE/1000000)
+WHERE
+	PK >=0;
+    
+#######################################################
+## Switch data where from and to spans are reversed ###
+
+## Create Place holders for data##
+# Pr = prefix, Mi = mile, Po = Pole, Le = Letter || S = Start, E = End
+alter table spans
+	add column PrTemp varchar(50) default null
+    ,add column MiTemp varchar(50) default null
+    ,add column PoTemp varchar(50) default null
+    ,add column LeTemp varchar(50) default null;
+
+# Place all starting data into the temp columns
+UPDATE spans
+SET
+    PrTemp = IF(start_pole > end_pole, PrS,PrTemp)
+    ,MiTemp = IF(start_pole > end_pole, MiS,MiTemp)
+    ,PoTemp = IF(start_pole > end_pole, PoS,PoTemp)
+    ,LeTemp = IF(start_pole > end_pole, LeS,LeTemp)
+WHERE
+	PK >=0;
+    
+# Place all endng data into the starting columns
+UPDATE spans
+SET
+    PrS = IF(start_pole > end_pole, PrE,Prs)
+    ,MiS = IF(start_pole > end_pole, MiE,MiS)
+    ,PoS = IF(start_pole > end_pole, PoE,PoS)
+    ,LeS = IF(start_pole > end_pole, LeE,LeS)
+WHERE
+	PK >=0;
+    
+# Place all Temp(starting) data into the ending columns
+UPDATE spans
+SET
+    PrE = IF(start_pole > end_pole, PrTemp,PrE)
+    ,MiE = IF(start_pole > end_pole, MiTemp,MiE)
+    ,PoE = IF(start_pole > end_pole, PoTemp,PoE)
+    ,LeE = IF(start_pole > end_pole, LeTemp,LeE)
+WHERE
+	PK >=0;
+    
+UPDATE spans
+SET
+	start_pole = MiS + (PoS/10000) + (LeS/1000000)
+    ,end_pole = MiE + (PoE/10000) + (LeE/1000000)
+WHERE
+	PK >=0;
+
+# Remove extra data - just needed for swapping column information
+alter table spans
+	drop column PrTemp 
+    ,drop column MiTemp 
+    ,drop column PoTemp 
+    ,drop column LeTemp ;
+    
+##################################################################
+#### Join cleaned data, results will still need manual checks ####
+##################################################################
+
+select
+	p.ProjID
+    ,p.ProjName
+    ,p.TLINE_NAME
+    ,p.KV
+    ,p.LINE_ID
+    ,p.FROM_S 'From'
+    ,p.TO_S 'To'
+    ,s.TLINE_Name
+    ,s.KV
+    ,s.Route_ID
+    ,s.SPAN_ID
+    ,s.FROM_TO
+    ,'Austin' AS InputBy
+FROM project p
+JOIN spans s on p.TLINE_NAME = s.TLINE_NAME AND start_pole >= work_start and start_pole < work_end
+
+GROUP BY s.FROM_TO
+
+order by p.ProjName, p.TLINE_NAME,s.start_pole
+
+#####################
+### Export to CSV ###
+#####################
+
+ INTO OUTFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/powerlines/sql_lines_export.csv' 
+ COLUMNS TERMINATED BY ','
+ OPTIONALLY ENCLOSED BY '"'
+ ESCAPED BY '"' 
+ LINES TERMINATED BY '\n';
